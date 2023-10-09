@@ -2,25 +2,26 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import datetime
 import numpy as np
-from EnKF import my_EnKF, validation
+from EnKF import EKI, validation
+
 
 dim_obs = 1  # number of the observation variables
-dim_state = 3  # the state dimension d
+dim_param = 4  # the parameter dimension
 N = 500
 # parameter vector: alpha, beta0, Rref, E0
 # create initial ensemble from uniform distribution
-# min = [0, 0, 0, 100]
-# max = [0.1, 100, 20, 250]
-# np.random.seed(0)
-# param_ens = np.random.uniform(low=min, high=max, size=(N, dim_state))
+min = [0, 0, 0, 100]
+max = [0.1, 100, 20, 250]
+np.random.seed(0)
+param_ens = np.random.uniform(low=min, high=max, size=(N, dim_param))
 
 # create initial ensemble from normal distribution
 # different way to create initial ensemble only influence the start of the resulting time series and do not have much
 # effect on the later part of the estimated time series
-mean = np.array([0.04, 22.75, 2.91, ])  # 181.68])
-cov = np.diag([0.00096, 295.35, 3.04, ])  # 4489.69])
-np.random.seed(0)
-param_ens = np.random.multivariate_normal(mean, cov, N)
+# mean = np.array([0.04, 22.75, 2.91,  181.68])
+# cov = np.diag([0.00096, 295.35, 3.04, 4489.69])
+# np.random.seed(0)
+# param_ens = np.random.multivariate_normal(mean, cov, N)
 
 param_ens = param_ens.T
 # print(np.var(param_ens, axis=1))
@@ -37,18 +38,20 @@ var.dropna(axis=0, subset=['TA_F_MDS', 'TS_F_MDS_1', 'SW_IN_F', 'NEE_VUT_USTAR50
 forcing = var.loc[:, ['TA_F_MDS', 'TS_F_MDS_1', 'SW_IN_F', 'VPD_F_MDS']].values
 obs = var.loc[:, ['NEE_VUT_USTAR50']]
 Z = obs.values
-date_start = datetime.datetime(2003, 1, 1, 0, 0, 0)
-date_end = datetime.datetime(2004, 1, 1, 0, 0, 0)
 
 # obs_noise is variance, not standard deviation
-obs_noise = var['NEE_VUT_USTAR50_RANDUNC'].fillna(var['NEE_VUT_USTAR50_RANDUNC'].mean()).values ** 2
-
+# obs_noise = var['NEE_VUT_USTAR50_RANDUNC'].fillna(var['NEE_VUT_USTAR50_RANDUNC'].mean()).values ** 2
+obs_noise = var['NEE_VUT_USTAR50_RANDUNC'].mean() ** 2
+H = np.array([[0, 0, 0, 0, 1]])
 starttime = datetime.datetime.now()
-model, anlys, ci_low, ci_high = my_EnKF(Z, N, dim_state, dim_obs, forcing, param_ens, obs_noise)
+model, anlys, anlys_std = EKI(Z, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise)
 endtime = datetime.datetime.now()
 print('running time %s s' % (endtime - starttime).seconds)
 
 # validate the performance of the estimated parameters
+
+date_start = datetime.datetime(2003, 1, 1, 0, 0, 0)
+date_end = datetime.datetime(2004, 1, 1, 0, 0, 0)
 estimatedNEE = validation(anlys, forcing)
 plt.plot(estimatedNEE, label='estimated NEE')
 plt.plot(obs.values, label='observed NEE')

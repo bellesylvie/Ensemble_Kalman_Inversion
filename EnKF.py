@@ -5,53 +5,56 @@ from numpy import dot
 import scipy.stats as st
 
 
-def my_EnKF(Z, N, dim_state, dim_obs, forcing, param_ens, obs_noise):
+def EKI(Z, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise):
     '''
-    :param Z: the array of observation variables
+    :param Z: the array of observations
     :param N: the number of samples in the ensemble
-    :param dim_state: the number of the state variables
+    :param dim_param: the number of parameters to estimate
     :param dim_obs: the number of the observation variables
-    :param forcing: the forcing data for NEE model
+    :param forcing: the forcing data for NEE model, like temperature, solar radiation, etc.
     :param param_ens: the ensemble of the parameter vectors
     :param obs_noise: the measurement noise
-    :return: the estimated parameter vector, the updated parameter vector, the 95%-confidence interval of the updated parameter vector
+    :return: the estimated parameter vector, the updated parameter vector, and the standard deviation of the updated
+    parameters
     '''
 
     T = len(forcing)
-    model = np.zeros((T, dim_state))
-    anlys = np.zeros((T, dim_state))
-    low_ci_bounds = np.zeros((T, dim_state))
-    high_ci_bounds = np.zeros((T, dim_state))
-    num_param = len(param_ens)
+    model = np.zeros((T, dim_param+dim_obs))
+    anlys = np.zeros((T, dim_param+dim_obs))
+    anlys_std = np.zeros((T, dim_param+dim_obs))
+    # low_ci_bounds = np.zeros((T, dim_state))
+    # high_ci_bounds = np.zeros((T, dim_state))
 
     for i in range(T):
         # prediction
-        V_hat = forecast(N, param_ens, dim_state)
+        V_hat = forecast(forcing[i, :], N, param_ens, dim_param, dim_obs)
         model[i, :] = V_hat.mean(axis=1)
+        C_hat = get_C_hat(V_hat, N, dim_param+dim_obs)
         # update
-        R = np.eye(dim_obs) * obs_noise[i]
+        R = np.eye(dim_obs) * obs_noise
         Z_ens = generate_obs_ensemble(Z[i], R, N, dim_obs)
-        update = analysis(V_hat, forcing[i, :], Z_ens, N, dim_state, dim_obs, R)
+        update = analysis(V_hat, C_hat, H, Z_ens, N, dim_param, dim_obs, R)
 
         # record target variables
         anlys[i, :] = update.mean(axis=1)
-        param_ens = update[:num_param, :]
+        anlys_std[i, :] = update.std(axis=1)
 
-        low_ci_bound, high_ci_bound = st.t.interval(0.95, N - 1, loc=update.mean(axis=1), scale=st.sem(update, axis=1))
-        low_ci_bounds[i, :] = low_ci_bound
-        high_ci_bounds[i, :] = high_ci_bound
+        # low_ci_bound, high_ci_bound = st.t.interval(0.95, N - 1, loc=update.mean(axis=1), scale=st.sem(update, axis=1))
+        # low_ci_bounds[i, :] = low_ci_bound
+        # high_ci_bounds[i, :] = high_ci_bound
+        param_ens = update[:dim_param, :]
 
-    return model, anlys, low_ci_bounds, high_ci_bounds
+    return model, anlys, anlys_std
 
 
 def nee_model(param_vect, driver_vect):
     T0 = -46.02
     Tref = 10
     k = 0.021
-    E0 = 178
+    # E0 = 178
 
     Ta, Ts, Rad, VPD = driver_vect
-    alpha, beta0, Rb = param_vect
+    alpha, beta0, Rb, E0 = param_vect
     if Ts > 0:
         r = Rb * math.exp(E0 * (1 / (Tref - T0) - 1 / (Ta - T0)))
     else:
@@ -68,20 +71,19 @@ def nee_model(param_vect, driver_vect):
     return nee
 
 
-def forecast(N, param_ens, dim_state):
+def forecast(forcing, N, param_ens, dim_param, dim_obs):
     '''
     This function takes the posterior ensemble from the last step V_0, the state dimension dim_state,
     the number of ensemble members N, the current timestep t
     It uses the integrate function the create the forecast ensemble V_hat = forecast.
     '''
 
-    forecast = np.zeros((dim_state, N))
-    # 参数的随机游走模型不确定性用Q = diag((1/0.9975-1)*P_a)表示,Q是对角矩阵
-    P_a = np.cov(param_ens)
-    Q_param = np.diag(np.diag((1/0.9975-1)*P_a))
+    forecast = np.zeros((dim_param+dim_obs, N))
+    # propagate parameters
+    forecast[:dim_param, :] = param_ens
+    # calculate NEE
     for i in range(N):
-        param_new = param_ens[:, i] + np.random.multivariate_normal(np.zeros(dim_state), Q_param, 1).flatten()
-        forecast[:, i] = param_new
+        forecast[-dim_obs, i] = nee_model(param_ens[:, i], forcing[:])
     return forecast
 
 
@@ -98,38 +100,36 @@ def generate_obs_ensemble(Z, R, N, dim_obs):
     return Z_new
 
 
-def analysis(V_hat, forcing, Z_ens, N, dim_state, dim_obs, R):
+def analysis(V_hat, C, H, Z_ens, N, dim_param, dim_obs, R):
     '''
     This function takes the forecast ensemble V_hat, the forecast covariance matrix C, the observation matrix H,
-    the ensemble of the observation Z_ens, the number of ensemble members K, the system dimension d, and the observation
-    error covariance R.
-    It returns the posterior ensemble V, saved into process.
+    the ensemble of the observation Z_ens, the number of ensemble members N, the parameter dimension dim_param, and the
+    number of observed components dim_obs.
+    It returns the posterior ensemble V.
     '''
+    V = np.zeros((dim_param+dim_obs, N))
 
-    V = np.zeros((dim_state, N))
-
-    Z_hat = np.zeros((dim_obs, N))
-    for i in range(N):
-        Z_hat[:, i] = nee_model(V_hat[:, i], forcing[:])
-
-    anomaly_x = anomaly(V_hat, N)
-    anomaly_y = anomaly(Z_hat, N)
-    cov_xy = 1/(N-1) * dot(anomaly_x, np.transpose(anomaly_y))
-    cov_yy = 1/(N-1) * dot(anomaly_y, np.transpose(anomaly_y))
-
-    K = dot(cov_xy, inv(cov_yy + R))
-    for n in range(N):
-        V[:, n] = V_hat[:, n] - dot(K, Z_hat[:, n] - Z_ens[:, n])
+    for k in range(N):
+        V[:, k] = V_hat[:, k] - dot(dot(dot(C, np.transpose(H)), inv(R + dot(H, dot(C, np.transpose(H))))),
+                                    dot(H, V_hat[:, k]) - Z_ens[:, k])
     return V
 
 
-def anomaly(samples, N):
-    anomaly = np.zeros_like(samples)
-    # 计算离均差
-    for n in range(N):
-        anomaly[:, n] = samples[:, n] - samples.mean(axis=1)
+def get_C_hat(V_hat, N, d):
+    '''
+    This function takes the forecast ensemble V_hat, the number of ensemble members N, and the dimension of state vector d.
+    It returns the forecast covariance matrix C_hat.
+    '''
+    V_bar_hat = 1 / N * np.sum(V_hat, axis=1)
+    C_hat = np.zeros((d, d))
 
-    return anomaly
+    for i in range(N):
+        temp = V_hat[:, i] - V_bar_hat
+        C_hat = C_hat + np.outer(temp, temp)
+
+    C_hat = 1 / (N - 1) * C_hat
+
+    return C_hat
 
 
 def validation(param, driver):
