@@ -26,23 +26,26 @@ def EKI(Z, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise):
     # high_ci_bounds = np.zeros((T, dim_state))
 
     for i in range(T):
-        # prediction
-        V_hat = forecast(forcing[i, :], N, param_ens, dim_param, dim_obs)
-        model[i, :] = V_hat.mean(axis=1)
-        C_hat = get_C_hat(V_hat, N, dim_param+dim_obs)
-        # update
-        R = np.eye(dim_obs) * obs_noise
-        Z_ens = generate_obs_ensemble(Z[i], R, N, dim_obs)
-        update = analysis(V_hat, C_hat, H, Z_ens, N, dim_param, dim_obs, R)
+        if np.isnan(Z[i]):
+            param_ens = param_ens
+        else:
+            # prediction
+            V_hat = forecast(forcing[i, :], N, param_ens, dim_param, dim_obs)
+            model[i, :] = V_hat.mean(axis=1)
+            C_hat = get_C_hat(V_hat, N, dim_param+dim_obs)
+            # update
+            R = np.eye(dim_obs) * obs_noise
+            Z_ens = generate_obs_ensemble(Z[i], R, N, dim_obs)
+            update = analysis(V_hat, C_hat, H, Z_ens, N, dim_param, dim_obs, R)
 
-        # record target variables
-        anlys[i, :] = update.mean(axis=1)
-        anlys_std[i, :] = update.std(axis=1)
+            # record target variables
+            anlys[i, :] = update.mean(axis=1)
+            anlys_std[i, :] = update.std(axis=1)
 
-        # low_ci_bound, high_ci_bound = st.t.interval(0.95, N - 1, loc=update.mean(axis=1), scale=st.sem(update, axis=1))
-        # low_ci_bounds[i, :] = low_ci_bound
-        # high_ci_bounds[i, :] = high_ci_bound
-        param_ens = update[:dim_param, :]
+            # low_ci_bound, high_ci_bound = st.t.interval(0.95, N - 1, loc=update.mean(axis=1), scale=st.sem(update, axis=1))
+            # low_ci_bounds[i, :] = low_ci_bound
+            # high_ci_bounds[i, :] = high_ci_bound
+            param_ens = update[:dim_param, :]
 
     return model, anlys, anlys_std
 

@@ -11,7 +11,7 @@ N = 500
 # parameter vector: alpha, beta0, Rref, E0
 # create initial ensemble from uniform distribution
 min = [0, 0, 0, 100]
-max = [0.1, 100, 20, 250]
+max = [0.1, 50, 20, 200]
 np.random.seed(0)
 param_ens = np.random.uniform(low=min, high=max, size=(N, dim_param))
 
@@ -26,14 +26,20 @@ param_ens = np.random.uniform(low=min, high=max, size=(N, dim_param))
 param_ens = param_ens.T
 # print(np.var(param_ens, axis=1))
 
-data = pd.read_csv(r'G:\fluxnet2015\fluxnetUnpack\FLX_US-Los_FLUXNET2015_FULLSET_DD_2000-2014_2-4.csv',
-                   index_col='TIMESTAMP')
-var = data.loc['20030101':'20031231', ['TA_F_MDS', 'TS_F_MDS_1', 'SW_IN_F', 'VPD_F_MDS',
+data = pd.read_csv(r'G:\fluxnet2015\fluxnetUnpack\FLX_US-Los_FLUXNET2015_FULLSET_HH_2000-2014_2-4.csv')
+data.index = pd.to_datetime(data['TIMESTAMP_START'].astype('str'))
+
+date_start = datetime.datetime(2003, 1, 1, 0, 0, 0)
+date_end = datetime.datetime(2003, 12, 1, 0, 0, 0)
+
+var = data.loc[date_start:date_end, ['TA_F_MDS', 'TS_F_MDS_1', 'SW_IN_F', 'VPD_F_MDS',
                                        'TA_F_MDS_QC', 'TS_F_MDS_1_QC', 'SW_IN_F_QC', 'VPD_F_MDS_QC',
                                        'NEE_VUT_USTAR50', 'NEE_VUT_USTAR50_QC', 'NEE_VUT_USTAR50_RANDUNC']]
 
 var[var == -9999] = np.nan
-var.dropna(axis=0, subset=['TA_F_MDS', 'TS_F_MDS_1', 'SW_IN_F', 'NEE_VUT_USTAR50'], inplace=True)
+# var.dropna(axis=0, subset=['TA_F_MDS', 'TS_F_MDS_1', 'SW_IN_F', 'NEE_VUT_USTAR50'], inplace=True)
+# only estimate the parameters for observed NEE not for interpolated NEE
+var.loc[var['NEE_VUT_USTAR50_QC'] > 0, 'NEE_VUT_USTAR50'] = np.nan
 
 forcing = var.loc[:, ['TA_F_MDS', 'TS_F_MDS_1', 'SW_IN_F', 'VPD_F_MDS']].values
 obs = var.loc[:, ['NEE_VUT_USTAR50']]
@@ -48,11 +54,13 @@ model, anlys, anlys_std = EKI(Z, H, N, dim_param, dim_obs, forcing, param_ens, o
 endtime = datetime.datetime.now()
 print('running time %s s' % (endtime - starttime).seconds)
 
+prior = pd.DataFrame(model, index=obs.index, columns=['alpha', 'beta0', 'Rref', 'E0', 'NEE'])
+posterior = pd.DataFrame(anlys, index=obs.index, columns=['alpha', 'beta0', 'Rref', 'E0', 'NEE'])
+
 # validate the performance of the estimated parameters
 
-date_start = datetime.datetime(2003, 1, 1, 0, 0, 0)
-date_end = datetime.datetime(2004, 1, 1, 0, 0, 0)
-estimatedNEE = validation(anlys, forcing)
+
+estimatedNEE = validation(anlys[:-1], forcing)
 plt.plot(estimatedNEE, label='estimated NEE')
 plt.plot(obs.values, label='observed NEE')
 plt.legend()
