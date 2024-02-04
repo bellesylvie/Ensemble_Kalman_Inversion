@@ -26,9 +26,7 @@ def EKI(Z, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise):
     # high_ci_bounds = np.zeros((T, dim_state))
 
     for i in range(T):
-        if np.isnan(Z[i]):
-            param_ens = param_ens
-        else:
+        if ~np.isnan(Z[i]):
             # prediction
             V_hat = forecast(forcing[i, :], N, param_ens, dim_param, dim_obs)
             model[i, :] = V_hat.mean(axis=1)
@@ -52,7 +50,7 @@ def EKI(Z, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise):
 
 def nee_model(param_vect, driver_vect):
     T0 = -46.02
-    Tref = 10
+    Tref = 15
     k = 0.021
     # E0 = 178
 
@@ -74,19 +72,27 @@ def nee_model(param_vect, driver_vect):
     return nee
 
 
-def forecast(forcing, N, param_ens, dim_param, dim_obs):
+def forecast(forcing, N, param_ens, dim_param, dim_obs, var_inflation):
     '''
-    This function takes the posterior ensemble from the last step V_0, the state dimension dim_state,
-    the number of ensemble members N, the current timestep t
-    It uses the integrate function the create the forecast ensemble V_hat = forecast.
+    This function takes the posterior ensemble from the last step V_0, the parameter dimension dim_param,
+    the number of ensemble members N, the forcing data for the NEE model forcing, the dimension of observation dim_obs,
+    and whether to do variance inflation var_inflation
     '''
 
     forecast = np.zeros((dim_param+dim_obs, N))
-    # propagate parameters
-    forecast[:dim_param, :] = param_ens
+
+    if ~var_inflation:
+        param_ens_forecast = param_ens
+    else:
+        param_cov_infl = (1/0.9975-1)*np.diag(np.diag(np.cov(param_ens)))
+        param_ens_forecast = np.zeros_like(param_ens)
+        for i in range(N):
+             param_ens_forecast[:, i] = param_ens[:, i] + np.random.multivariate_normal(np.zeros(dim_param), param_cov_infl, 1)
+
+    forecast[:dim_param, :] = param_ens_forecast
     # calculate NEE
     for i in range(N):
-        forecast[-dim_obs, i] = nee_model(param_ens[:, i], forcing[:])
+        forecast[-dim_obs, i] = nee_model(param_ens_forecast[:, i], forcing[:])
     return forecast
 
 
@@ -111,10 +117,9 @@ def analysis(V_hat, C, H, Z_ens, N, dim_param, dim_obs, R):
     It returns the posterior ensemble V.
     '''
     V = np.zeros((dim_param+dim_obs, N))
-
+    K = dot(dot(C, np.transpose(H)), inv(R + dot(H, dot(C, np.transpose(H)))))
     for k in range(N):
-        V[:, k] = V_hat[:, k] - dot(dot(dot(C, np.transpose(H)), inv(R + dot(H, dot(C, np.transpose(H))))),
-                                    dot(H, V_hat[:, k]) - Z_ens[:, k])
+        V[:, k] = V_hat[:, k] - dot(K, dot(H, V_hat[:, k]) - Z_ens[:, k])
     return V
 
 
