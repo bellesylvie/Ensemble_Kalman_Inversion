@@ -3,11 +3,53 @@ import matplotlib.pyplot as plt
 import datetime
 import numpy as np
 from EnKF import EKI, validation
+import math
+
+def nee_model(param_vect, driver_vect):
+    T0 = -46.02
+    Tref = 15
+    k = 0.021
+    # E0 = 178
+    Ta, Ts, Rad, VPD = driver_vect
+    alpha, beta0, Rb, E0 = param_vect
+    if Ts > 0:
+        r = Rb * math.exp(E0 * (1 / (Tref - T0) - 1 / (Ta - T0)))
+    else:
+        r = Rb * math.exp(E0 * (1 / (Tref - T0) - 1 / (Ts - T0)))
+    if Rad > 4:
+        if VPD > 10:
+            beta = beta0 * np.exp(-k*(VPD-10))
+        else:
+            beta = beta0
+        nee = -1 * alpha * beta * Rad / (alpha * Rad + beta) + r
+    else:
+        nee = r
+    return nee
+
+
+def NEE_model_con(param, forcing):
+    t0 = 227.13
+    e0 = 185.45
+    a, k, rp = param
+    ta, ppfd, ts = forcing
+    if ts > 0:
+        r = rp * np.exp(-1 * e0 / (ta + 273.15 - t0))
+        if ppfd < 5:
+            nee = r
+        else:
+            nee = (-1 * a * ppfd) / (k + ppfd) + r
+    else:
+        r = rp * np.exp(-1 * e0 / (ts + 273.15 - t0))
+        if ppfd < 5:
+            nee = r
+        else:
+            nee = a
+    return nee
 
 
 dim_obs = 1  # number of the observation variables
 dim_param = 4  # the parameter dimension
-N = 500
+N = 50
 # parameter vector: alpha, beta0, Rref, E0
 # create initial ensemble from uniform distribution
 # min = [0, 0, 0, 150]
@@ -19,12 +61,12 @@ N = 500
 # different way to create initial ensemble only influence the start of the resulting time series and do not have much
 # effect on the later part of the estimated time series
 mean = np.array([0.04, 22.75, 2.91, 181.68])
-# cov = np.diag([0.00096, 295.35, 3.04, 4489.69])
-cov = np.array([[0.00096, 0, 0, 0],
-                [0, 295.35, 0, 45.025],
-                [0, 0, 3.04, 0],
-                [0, 0, 45.025, 4489.69]
-                ])
+cov = np.diag([0.00096, 331, 3.04, 21124.87])
+# cov = np.array([[0.00096, 0, 0, 0],
+#                 [0, 295.35, 0, 45.025],
+#                 [0, 0, 3.04, 0],
+#                 [0, 0, 45.025, 21124.87]
+#                 ])
 np.random.seed(0)
 param_ens = np.random.multivariate_normal(mean, cov, N)
 
@@ -56,7 +98,7 @@ Z = obs.values
 obs_noise = var['NEE_VUT_USTAR50_RANDUNC'].mean() ** 2
 H = np.array([[0, 0, 0, 0, 1]])
 starttime = datetime.datetime.now()
-model, anlys, anlys_std = EKI(Z, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise)
+model, anlys, anlys_std = EKI(Z, nee_model, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise)
 endtime = datetime.datetime.now()
 print('running time %s s' % (endtime - starttime).seconds)
 
@@ -66,9 +108,9 @@ posterior = pd.DataFrame(anlys, index=obs.index, columns=['alpha', 'beta0', 'Rre
 # validate the performance of the estimated parameters
 
 
-estimatedNEE = validation(anlys[:-1], forcing)
-plt.plot(estimatedNEE, label='estimated NEE')
-plt.plot(obs.values, label='observed NEE')
+estimatedNEE = validation(nee_model, anlys[:-1], forcing)
+plt.plot(obs.values, label='observed NEE', colour='orange')
+plt.plot(estimatedNEE, label='estimated NEE', colour='b')
 plt.legend()
 plt.title('US-Los 2003')
 plt.ylabel('NEE')
