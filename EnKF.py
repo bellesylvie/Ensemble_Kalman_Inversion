@@ -30,28 +30,22 @@ def EKI(Z, MODEL, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise):
             V_hat = forecast(MODEL, forcing[i, :], N, param_ens, dim_param, dim_obs, var_inflation=True)
             model[i, :] = V_hat.mean(axis=1)
             print(f'At {i} time step, the forecasted ensemble mean is {model[i, :]}')
-            # C_hat = get_C_hat(V_hat, N, dim_param+dim_obs)
-            # update: EnKF is used as a way to solve resolution
-            # iterate 10 times
-            # R = obs_noise
             R = abs(Z[i])*0.2
-            record_iter_results = np.zeros((10, dim_obs+dim_param, N))
             for j in range(10):
                 V_hat = forecast(MODEL, forcing[i, :], N, param_ens, dim_param, dim_obs, var_inflation=False)
                 C_hat = np.cov(V_hat, rowvar=True)
-                update = analysis(V_hat, C_hat, H, Z[i], N, dim_param, dim_obs, R)
-                record_iter_results[j, ...] = update
-                param_ens = update[:dim_param, :]
+                analysis = update(V_hat, C_hat, H, Z[i], N, dim_param, dim_obs, R)
+                param_ens = analysis[:dim_param, :]
 
-            print(f'At {i} time step, the EKI updated parameters are : {record_iter_results.mean(axis=(0, 2))}')
+            print(f'At {i} time step, the EKI updated parameters are : {param_ens.mean(axis=1)}')
             # record target variables
-            anlys[i, :] = record_iter_results.mean(axis=(0, 2))
-            anlys_std[i, :] = record_iter_results.std(axis=(0, 2))
+            anlys[i, :] = param_ens.mean(axis=1)
+            anlys_std[i, :] = param_ens.std(axis=1)
 
             # low_ci_bound, high_ci_bound = st.t.interval(0.95, N - 1, loc=update.mean(axis=1), scale=st.sem(update, axis=1))
             # low_ci_bounds[i, :] = low_ci_bound
             # high_ci_bounds[i, :] = high_ci_bound
-            param_ens = record_iter_results.mean(axis=0)[:dim_param, :]
+            # param_ens = record_iter_results.mean(axis=0)[:dim_param, :]
 
     return model, anlys, anlys_std
 
@@ -61,6 +55,7 @@ def forecast(MODEL, forcing, N, param_ens, dim_param, dim_obs, var_inflation):
     This function takes the posterior ensemble from the last step V_0, the parameter dimension dim_param,
     the number of ensemble members N, the forcing data for the NEE model forcing, the dimension of observation dim_obs,
     and whether to do variance inflation var_inflation
+    return: augmented state vector ensemble with parameters and observations
     '''
 
     forecast = np.zeros((dim_param+dim_obs, N))
@@ -75,12 +70,11 @@ def forecast(MODEL, forcing, N, param_ens, dim_param, dim_obs, var_inflation):
 
     forecast[:dim_param, :] = param_ens_forecast
     for i in range(N):
-        forecast[-dim_obs, i] = MODEL(param_ens_forecast[:, i], forcing[:])
+        forecast[dim_param:, i] = MODEL(param_ens_forecast[:, i], forcing[:])
     return forecast
 
 
-
-def analysis(V_hat, C, H, Z, N, dim_param, dim_obs, R):
+def update(V_hat, C, H, Z, N, dim_param, dim_obs, R):
     '''
     This function takes the forecast ensemble V_hat, the forecast covariance matrix C, the observation matrix H,
     the ensemble of the observation Z_ens, the number of ensemble members N, the parameter dimension dim_param, and the
@@ -89,28 +83,11 @@ def analysis(V_hat, C, H, Z, N, dim_param, dim_obs, R):
     '''
     V = np.zeros((dim_param+dim_obs, N))
     K = dot(dot(C, np.transpose(H)), inv(R + dot(H, dot(C, np.transpose(H)))))
-    print(K.round(4))
+    print(f'Kalman gain is {K.round(3)}')
     for k in range(N):
-        Z_perturb = Z + np.random.normal(np.zeros(dim_obs), R, 1)
-        V[:, k] = V_hat[:, k] - dot(K, dot(H, V_hat[:, k]) - Z_perturb)
+        Z_perturb = Z + np.random.multivariate_normal(np.zeros(dim_obs), R, 1).T
+        V[:, k] = (V_hat[:, k].reshape(dim_obs+dim_param, 1) - dot(K, dot(H, V_hat[:, k].reshape(dim_obs+dim_param, 1)) - Z_perturb)).flatten()
     return V
-
-
-# def get_C_hat(V_hat, N, d):
-#     '''
-#     This function takes the forecast ensemble V_hat, the number of ensemble members N, and the dimension of state vector d.
-#     It returns the forecast covariance matrix C_hat.
-#     '''
-#     V_bar_hat = 1 / N * np.sum(V_hat, axis=1)
-#     C_hat = np.zeros((d, d))
-#
-#     for i in range(N):
-#         temp = V_hat[:, i] - V_bar_hat
-#         C_hat = C_hat + np.outer(temp, temp)
-#
-#     C_hat = 1 / (N - 1) * C_hat
-#
-#     return C_hat
 
 
 def validation(MODEL, param, driver):
