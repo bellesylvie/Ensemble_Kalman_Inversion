@@ -27,25 +27,25 @@ def EKI(Z, MODEL, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise):
     for i in range(T):
         if ~np.isnan(Z[i]):
             # prediction
-            V_hat = forecast(MODEL, forcing[i, :], N, param_ens, dim_param, dim_obs, var_inflation=True)
+            V_hat = forecast(MODEL, forcing[i, ...], N, param_ens, dim_param, dim_obs, var_inflation=True)
             model[i, :] = V_hat.mean(axis=1)
             print(f'At {i} time step, the forecasted ensemble mean is {model[i, :]}')
-            R = abs(Z[i])*0.2
+            # R = np.diag([obs_noise])
+            R = np.diag(abs(Z[i])*0.1)
             for j in range(10):
-                V_hat = forecast(MODEL, forcing[i, :], N, param_ens, dim_param, dim_obs, var_inflation=False)
+                V_hat = forecast(MODEL, forcing[i, ...], N, param_ens, dim_param, dim_obs, var_inflation=False)
                 C_hat = np.cov(V_hat, rowvar=True)
                 analysis = update(V_hat, C_hat, H, Z[i], N, dim_param, dim_obs, R)
                 param_ens = analysis[:dim_param, :]
 
-            print(f'At {i} time step, the EKI updated parameters are : {param_ens.mean(axis=1)}')
+            print(f'At {i} time step, the EKI updated parameters are : {analysis.mean(axis=1)},\n the true observed NEE is {Z[i]}')
             # record target variables
-            anlys[i, :] = param_ens.mean(axis=1)
-            anlys_std[i, :] = param_ens.std(axis=1)
+            anlys[i, :] = analysis.mean(axis=1)
+            anlys_std[i, :] = analysis.std(axis=1)
 
             # low_ci_bound, high_ci_bound = st.t.interval(0.95, N - 1, loc=update.mean(axis=1), scale=st.sem(update, axis=1))
             # low_ci_bounds[i, :] = low_ci_bound
             # high_ci_bounds[i, :] = high_ci_bound
-            # param_ens = record_iter_results.mean(axis=0)[:dim_param, :]
 
     return model, anlys, anlys_std
 
@@ -63,14 +63,15 @@ def forecast(MODEL, forcing, N, param_ens, dim_param, dim_obs, var_inflation):
     if ~var_inflation:
         param_ens_forecast = param_ens
     else:
-        param_cov_infl = (1/0.9975-1)*np.diag(np.diag(np.cov(param_ens, rowvar=True)))
+        # 0.9975
+        param_cov_infl = (1/0.90-1)*np.diag(np.diag(np.cov(param_ens, rowvar=True)))
         param_ens_forecast = np.zeros_like(param_ens)
         for i in range(N):
              param_ens_forecast[:, i] = param_ens[:, i] + np.random.multivariate_normal(np.zeros(dim_param), param_cov_infl, 1)
 
     forecast[:dim_param, :] = param_ens_forecast
     for i in range(N):
-        forecast[dim_param:, i] = MODEL(param_ens_forecast[:, i], forcing[:])
+        forecast[dim_param:, i] = MODEL(param_ens_forecast[:, i], forcing)
     return forecast
 
 

@@ -3,13 +3,14 @@ import matplotlib.pyplot as plt
 import math
 from scipy.optimize import least_squares
 import numpy as np
+from EnKF import EKI
 
 
-def ER(T, p):
+def ER(params, T):
     # estimate the hourly ER with air or soil temperature
     T0 = -46.02
-    Tref = 15
-    Rb, E0 = p
+    Tref = 10
+    Rb, E0 = params
     r = Rb * np.exp(E0 * (1 / (Tref - T0) - 1 / (T - T0)))
     return r
 
@@ -20,9 +21,26 @@ def residuals(p, y, x):
 
 ER2016 = pd.data = pd.read_excel(r'G:\论文\生态\生态系统呼吸昼夜变化\Järveoja et al. data sets.xlsx', sheet_name='2016 AC ER')
 ER2016['datetime'] = pd.to_datetime(ER2016[['year', 'month', 'day', 'hour']])
+ER2016.set_index('datetime', inplace=True)
 
+dim_obs = 1  # number of the observation variables
+dim_param = 2  # the parameter dimension
+N = 50
+# parameter vector: Rref, E0
+min = [0, 50]
+max = [40, 400]
+np.random.seed(0)
+param_ens = np.random.uniform(low=min, high=max, size=(N, dim_param))
+param_ens = param_ens.T
 
+forcing = ER2016.loc['20160701', 'Ts10'].values
+obs = ER2016.loc['20160701', ['flux']]
+Z = obs.values
+H = np.array([[0, 0, 1]])
+obs_noise = ER2016['flux_std'].median()**2
+model, anlys, anlys_std = EKI(Z, ER, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise)
 
+print(anlys)
 # using the data shared by Järveoja et al. (2020) to see the relationship between ecosystem respiration and temperature
 # at hourly scale in a northern peatland ecosystem.
 
