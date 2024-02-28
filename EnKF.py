@@ -4,7 +4,7 @@ from numpy import dot
 import scipy.stats as st
 
 
-def EKI(Z, MODEL, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise):
+def EKI(Z, MODEL, H, N, dim_param, dim_obs, forcing, param_ens_inital, obs_noise):
     '''
     :param Z: the array of observations
     :param N: the number of samples in the ensemble
@@ -27,11 +27,12 @@ def EKI(Z, MODEL, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise):
     for i in range(T):
         if ~np.isnan(Z[i]):
             # prediction
-            V_hat = forecast(MODEL, forcing[i, ...], N, param_ens, dim_param, dim_obs, var_inflation=True)
+            V_hat = forecast(MODEL, forcing[i, ...], N, param_ens_inital, dim_param, dim_obs, var_inflation=False)
             model[i, :] = V_hat.mean(axis=1)
             print(f'At {i} time step, the forecasted ensemble mean is {model[i, :]}')
             # R = np.diag([obs_noise])
             R = np.diag(abs(Z[i])*0.1)
+            param_ens = param_ens_inital
             for j in range(10):
                 V_hat = forecast(MODEL, forcing[i, ...], N, param_ens, dim_param, dim_obs, var_inflation=False)
                 C_hat = np.cov(V_hat, rowvar=True)
@@ -84,21 +85,21 @@ def update(V_hat, C, H, Z, N, dim_param, dim_obs, R):
     '''
     V = np.zeros((dim_param+dim_obs, N))
     K = dot(dot(C, np.transpose(H)), inv(R + dot(H, dot(C, np.transpose(H)))))
-    print(f'Kalman gain is {K.round(3)}')
+    # print(f'Kalman gain is {K.round(3)}')
     for k in range(N):
         Z_perturb = Z + np.random.multivariate_normal(np.zeros(dim_obs), R, 1).T
         V[:, k] = (V_hat[:, k].reshape(dim_obs+dim_param, 1) - dot(K, dot(H, V_hat[:, k].reshape(dim_obs+dim_param, 1)) - Z_perturb)).flatten()
     return V
 
 
-def validation(MODEL, param, driver):
+def validate(MODEL, param, driver):
     t = len(driver)
     result = np.zeros((t, 1))
     for i in range(t):
-        if (driver[i, :] != -9999).all():
-            result[i, :] = MODEL(param[i, :], driver[i, :])
+        if (driver[i, ...] != -9999).all():
+            result[i, ...] = MODEL(param[i, :], driver[i, ...])
         else:
-            result[i, :] = np.nan
+            result[i, ...] = np.nan
     return result
 
 

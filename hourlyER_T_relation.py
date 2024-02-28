@@ -41,6 +41,7 @@ obs_noise = ER2016['flux_std'].median()**2
 model, anlys, anlys_std = EKI(Z, ER, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise)
 
 print(anlys)
+
 # using the data shared by Järveoja et al. (2020) to see the relationship between ecosystem respiration and temperature
 # at hourly scale in a northern peatland ecosystem.
 
