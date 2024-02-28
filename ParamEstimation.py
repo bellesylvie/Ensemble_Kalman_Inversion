@@ -67,11 +67,11 @@ cov = np.diag([0.00096, 295.35, 3.04, 4489.69])
 #                 [0, 0, 45.025, 21124.87]
 #                 ])
 np.random.seed(0)
-param_ens = np.random.multivariate_normal(mean, cov, N)
+param_ens_initial = np.random.multivariate_normal(mean, cov, N)
 
-param_ens = param_ens.T
-print(f'mean of the initial ensemble: {param_ens.mean(axis=1).round(3)}')
-print(f'cov of the initial ensemble: {np.cov(param_ens).round(3)}')
+param_ens_initial = param_ens_initial.T
+print(f'mean of the initial ensemble: {param_ens_initial.mean(axis=1).round(3)}')
+print(f'cov of the initial ensemble: {np.cov(param_ens_initial).round(3)}')
 
 data = pd.read_csv(r'G:\fluxnet2015\fluxnetUnpack\FLX_US-Los_FLUXNET2015_FULLSET_HH_2000-2014_2-4.csv')
 data.index = pd.to_datetime(data['TIMESTAMP_START'].astype('str'))
@@ -97,15 +97,49 @@ Z = obs.values
 obs_noise = var['NEE_VUT_USTAR50_RANDUNC'].mean() ** 2
 H = np.array([[0, 0, 0, 0, 1]])
 starttime = datetime.datetime.now()
-model, anlys, anlys_std = EKI(Z, nee_model, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise)
+
+T = len(forcing)
+param_ts = np.zeros((T, dim_param + dim_obs))
+param_std_ts = np.zeros((T, dim_param + dim_obs))
+# low_ci_bounds = np.zeros((T, dim_state))
+# high_ci_bounds = np.zeros((T, dim_state))
+
+window_size = 7*48
+# estimate parameters for the first time interval using the same initial ensemble
+for i in range(T):
+    if ~np.isnan(Z[i]):
+        if i <= window_size:
+            anlys, anlys_std = EKI(Z[i], nee_model, H, N, dim_param, dim_obs, forcing[i],
+                                          param_ens_initial, obs_noise)
+        else:
+            param_win = param_ts[i-window_size:i, :-1]
+            param_win_nan = param_win[~np.isnan(param_win).any(axis=1), :]
+            if param_win_nan.shape[0] > 10:
+                param_ens = np.random.multivariate_normal(np.mean(param_win_nan, axis=0),
+                                                          np.cov(param_win_nan, rowvar=False), N).T
+                anlys, anlys_std = EKI(Z[i], nee_model, H, N, dim_param, dim_obs, forcing[i], param_ens,
+                                              obs_noise)
+            else:
+                anlys, anlys_std = np.nan, np.nan
+        # print(f'At time {i}, the EKI updated parameters are : {anlys},\n the true observed NEE is {Z[i]}')
+        # record target variables
+        param_ts[i, :] = anlys
+        param_std_ts[i, :] = anlys_std
+    else:
+        param_ts[i, :] = np.nan
+        param_std_ts[i, :] = np.nan
+
+# low_ci_bound, high_ci_bound = st.t.interval(0.95, N - 1, loc=update.mean(axis=1), scale=st.sem(update, axis=1))
+# low_ci_bounds[i, :] = low_ci_bound
+# high_ci_bounds[i, :] = high_ci_bound
+
 endtime = datetime.datetime.now()
 print('running time %s s' % (endtime - starttime).seconds)
 
-prior = pd.DataFrame(model, index=obs.index, columns=['alpha', 'beta0', 'Rref', 'E0', 'NEE'])
-posterior = pd.DataFrame(anlys, index=obs.index, columns=['alpha', 'beta0', 'Rref', 'E0', 'NEE'])
+posterior = pd.DataFrame(param_ts, index=obs.index, columns=['alpha', 'beta0', 'Rref', 'E0', 'NEE'])
 
 # validate the performance of the estimated parameters
-estimatedNEE = validate(nee_model, anlys[:, :-1], forcing)
+estimatedNEE = validate(nee_model, param_ts[:, :-1], forcing)
 plt.plot(obs.index, obs.values, label='observed NEE', color='orange')
 plt.plot(obs.index, estimatedNEE, label='estimated NEE', color='b')
 plt.legend()
@@ -115,12 +149,16 @@ plt.xlabel('day')
 plt.show()
 
 plt.plot(posterior['beta0'])
+plt.title('beta0')
 plt.show()
 plt.plot(posterior['Rref'])
+plt.title('Rref')
 plt.show()
 plt.plot(posterior['E0'])
+plt.title('E0')
 plt.show()
 plt.plot(posterior['alpha'])
+plt.title('alpha')
 plt.show()
 #######################################A test for EKI using sin function###############################################
 # seed = random.random()

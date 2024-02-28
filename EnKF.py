@@ -3,8 +3,7 @@ from numpy.linalg import inv
 from numpy import dot
 import scipy.stats as st
 
-
-def EKI(Z, MODEL, H, N, dim_param, dim_obs, forcing, param_ens_inital, obs_noise):
+def EKI(Z, MODEL, H, N, dim_param, dim_obs, forcing, param_ens, obs_noise):
     '''
     :param Z: the array of observations
     :param N: the number of samples in the ensemble
@@ -17,38 +16,13 @@ def EKI(Z, MODEL, H, N, dim_param, dim_obs, forcing, param_ens_inital, obs_noise
     parameters
     '''
 
-    T = len(forcing)
-    model = np.zeros((T, dim_param+dim_obs))
-    anlys = np.zeros((T, dim_param+dim_obs))
-    anlys_std = np.zeros((T, dim_param+dim_obs))
-    # low_ci_bounds = np.zeros((T, dim_state))
-    # high_ci_bounds = np.zeros((T, dim_state))
-
-    for i in range(T):
-        if ~np.isnan(Z[i]):
-            # prediction
-            V_hat = forecast(MODEL, forcing[i, ...], N, param_ens_inital, dim_param, dim_obs, var_inflation=False)
-            model[i, :] = V_hat.mean(axis=1)
-            print(f'At {i} time step, the forecasted ensemble mean is {model[i, :]}')
-            # R = np.diag([obs_noise])
-            R = np.diag(abs(Z[i])*0.1)
-            param_ens = param_ens_inital
-            for j in range(10):
-                V_hat = forecast(MODEL, forcing[i, ...], N, param_ens, dim_param, dim_obs, var_inflation=False)
-                C_hat = np.cov(V_hat, rowvar=True)
-                analysis = update(V_hat, C_hat, H, Z[i], N, dim_param, dim_obs, R)
-                param_ens = analysis[:dim_param, :]
-
-            print(f'At {i} time step, the EKI updated parameters are : {analysis.mean(axis=1)},\n the true observed NEE is {Z[i]}')
-            # record target variables
-            anlys[i, :] = analysis.mean(axis=1)
-            anlys_std[i, :] = analysis.std(axis=1)
-
-            # low_ci_bound, high_ci_bound = st.t.interval(0.95, N - 1, loc=update.mean(axis=1), scale=st.sem(update, axis=1))
-            # low_ci_bounds[i, :] = low_ci_bound
-            # high_ci_bounds[i, :] = high_ci_bound
-
-    return model, anlys, anlys_std
+    R = np.diag(abs(Z)*0.1)
+    for j in range(10):
+        V_hat = forecast(MODEL, forcing, N, param_ens, dim_param, dim_obs, var_inflation=False)
+        C_hat = np.cov(V_hat, rowvar=True)
+        analysis = update(V_hat, C_hat, H, Z, N, dim_param, dim_obs, R)
+        param_ens = analysis[:dim_param, :]
+    return [analysis.mean(axis=1), analysis.std(axis=1)]
 
 
 def forecast(MODEL, forcing, N, param_ens, dim_param, dim_obs, var_inflation):
